@@ -5,40 +5,61 @@ export type Theme = 'dark' | 'light';
 interface ThemeContextType {
   theme: Theme;
   setTheme: (theme: Theme) => void;
+  toggleTheme: () => void;
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
-export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [theme, setTheme] = useState<Theme>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('tunnel-studio-theme');
-      if (saved === 'light' || saved === 'dark') {
-        return saved;
+function getInitialTheme(): Theme {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const stored = window.localStorage.getItem('tunnel-studio-theme');
+      if (stored === 'light' || stored === 'dark') {
+        return stored;
       }
     }
-    return 'dark'; // Default is dark as requested
-  });
+  } catch (err) {
+    console.warn('Storage unavailable:', err);
+  }
+  return 'dark'; // Dark is strictly default
+}
+
+export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [theme, setThemeState] = useState<Theme>(getInitialTheme);
+
+  const setTheme = (newTheme: Theme) => {
+    setThemeState(newTheme);
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem('tunnel-studio-theme', newTheme);
+      }
+    } catch (err) {
+      console.warn('Storage unavailable:', err);
+    }
+  };
+
+  const toggleTheme = () => {
+    setTheme(theme === 'dark' ? 'light' : 'dark');
+  };
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      localStorage.setItem('tunnel-studio-theme', theme);
       const root = document.documentElement;
       const themeColorMeta = document.querySelector('meta[name="theme-color"]');
 
       if (theme === 'dark') {
         root.classList.add('dark');
         root.classList.remove('light');
-        document.body.classList.remove('bg-slate-50', 'text-slate-900');
-        document.body.classList.add('bg-[#090a0f]', 'text-neutral-100');
+        document.body.style.backgroundColor = '#090a0f';
+        document.body.style.color = '#f5f5f5';
         if (themeColorMeta) {
           themeColorMeta.setAttribute('content', '#090a0f');
         }
       } else {
         root.classList.add('light');
         root.classList.remove('dark');
-        document.body.classList.remove('bg-[#090a0f]', 'text-neutral-100');
-        document.body.classList.add('bg-slate-50', 'text-slate-900');
+        document.body.style.backgroundColor = '#f8fafc';
+        document.body.style.color = '#0f172a';
         if (themeColorMeta) {
           themeColorMeta.setAttribute('content', '#f8fafc');
         }
@@ -47,7 +68,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [theme]);
 
   return (
-    <ThemeContext.Provider value={{ theme, setTheme }}>
+    <ThemeContext.Provider value={{ theme, setTheme, toggleTheme }}>
       {children}
     </ThemeContext.Provider>
   );

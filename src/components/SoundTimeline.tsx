@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { TimelineBlock } from '../types';
+import { TimelineBlock, InstrumentType } from '../types';
 import { Play, Square, Trash2, SlidersHorizontal } from 'lucide-react';
-import { playStudioChime } from '../utils/audio';
+import { playInstrumentSound } from '../utils/audio';
 import { useTheme } from '../context/ThemeContext';
 
 interface SoundTimelineProps {
@@ -9,12 +9,14 @@ interface SoundTimelineProps {
   onClear: () => void;
   onRemoveBlock?: (id: string) => void;
   activeBlockId?: string | null;
+  currentInstrument?: InstrumentType;
 }
 
 export const SoundTimeline: React.FC<SoundTimelineProps> = ({
   blocks,
   onClear,
   activeBlockId,
+  currentInstrument = 'chime',
 }) => {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
@@ -58,13 +60,13 @@ export const SoundTimeline: React.FC<SoundTimelineProps> = ({
 
     // Trigger first block immediately
     setCurrentPlayheadStep(blocks[0].step);
-    playStudioChime(blocks[0].freq);
+    playInstrumentSound(blocks[0].freq, blocks[0].instrument || currentInstrument);
 
     playIntervalRef.current = window.setInterval(() => {
       index += 1;
       if (index < blocks.length) {
         setCurrentPlayheadStep(blocks[index].step);
-        playStudioChime(blocks[index].freq);
+        playInstrumentSound(blocks[index].freq, blocks[index].instrument || currentInstrument);
       } else {
         if (playIntervalRef.current) clearInterval(playIntervalRef.current);
         setIsPlaying(false);
@@ -234,7 +236,7 @@ export const SoundTimeline: React.FC<SoundTimelineProps> = ({
                     {/* Sound Block on Canvas */}
                     <button
                       onClick={() => {
-                        playStudioChime(block.freq);
+                        playInstrumentSound(block.freq, block.instrument || currentInstrument);
                         setCurrentPlayheadStep(block.step);
                         setTimeout(() => setCurrentPlayheadStep(null), 400);
                       }}

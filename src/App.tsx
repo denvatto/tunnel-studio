@@ -1,11 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Volume2, Disc3 } from 'lucide-react';
 import { StudioMenu } from './components/StudioMenu';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { SoundTimeline } from './components/SoundTimeline';
-import { playStudioChime } from './utils/audio';
-import { TimelineBlock } from './types';
+import { InstrumentNav } from './components/InstrumentNav';
+import { InstrumentCreatorModal } from './components/InstrumentCreatorModal';
+import { playInstrumentSound } from './utils/audio';
+import { TimelineBlock, CustomInstrument } from './types';
 import { useTheme } from './context/ThemeContext';
+import { loadTimelineFromDB, saveTimelineToDB, clearTimelineInDB } from './utils/db';
+import { loadCustomInstruments, saveCustomInstruments } from './utils/instrumentStorage';
 
 const NOTES = [
   { note: 'C4', freq: 261.63 },
@@ -24,10 +28,45 @@ export default function App() {
   const [lastPlayedNote, setLastPlayedNote] = useState<string | null>(null);
   const [blocks, setBlocks] = useState<TimelineBlock[]>([]);
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
+  const [isDBLoaded, setIsDBLoaded] = useState(false);
+  const [currentInstrumentId, setCurrentInstrumentId] = useState<string>('default');
+  const [customInstruments, setCustomInstruments] = useState<CustomInstrument[]>(() =>
+    loadCustomInstruments()
+  );
+  const [showCreatorModal, setShowCreatorModal] = useState(false);
+
+  // 1. Initial load from IndexedDB on startup
+  useEffect(() => {
+    let isMounted = true;
+    loadTimelineFromDB()
+      .then((savedBlocks) => {
+        if (isMounted) {
+          if (savedBlocks && savedBlocks.length > 0) {
+            setBlocks(savedBlocks);
+          }
+          setIsDBLoaded(true);
+        }
+      })
+      .catch((err) => {
+        console.warn('Failed to load initial timeline from IndexedDB:', err);
+        if (isMounted) setIsDBLoaded(true);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // 2. Persist to IndexedDB whenever canvas blocks change
+  useEffect(() => {
+    if (isDBLoaded) {
+      saveTimelineToDB(blocks);
+    }
+  }, [blocks, isDBLoaded]);
 
   const triggerSound = (noteObj: { note: string; freq: number }) => {
-    // 1. Play synthesized studio chime
-    playStudioChime(noteObj.freq);
+    // 1. Play synthesized instrument sound using current instrument primitives
+    playInstrumentSound(noteObj.freq, currentInstrumentId, customInstruments);
     setLastPlayedNote(noteObj.note);
     setIsPulsing(true);
 
@@ -38,6 +77,7 @@ export default function App() {
       step: nextStep,
       note: noteObj.note,
       freq: noteObj.freq,
+      instrument: currentInstrumentId,
     };
 
     setBlocks((prev) => [...prev, newBlock]);
@@ -52,6 +92,38 @@ export default function App() {
     }, 600);
   };
 
+  const handleSelectInstrument = (instId: string) => {
+    setCurrentInstrumentId(instId);
+    playInstrumentSound(NOTES[selectedNoteIndex].freq, instId, customInstruments);
+  };
+
+  const handleSaveInstrument = (newInst: CustomInstrument) => {
+    const updated = [...customInstruments, newInst];
+    setCustomInstruments(updated);
+    saveCustomInstruments(updated);
+    if (newInst.inNav) {
+      setCurrentInstrumentId(newInst.id);
+    }
+    playInstrumentSound(NOTES[selectedNoteIndex].freq, newInst, updated);
+  };
+
+  const handleToggleNav = (id: string, inNav: boolean) => {
+    const updated = customInstruments.map((inst) =>
+      inst.id === id ? { ...inst, inNav } : inst
+    );
+    setCustomInstruments(updated);
+    saveCustomInstruments(updated);
+  };
+
+  const handleDeleteInstrument = (id: string) => {
+    const updated = customInstruments.filter((inst) => inst.id !== id);
+    setCustomInstruments(updated);
+    saveCustomInstruments(updated);
+    if (currentInstrumentId === id) {
+      setCurrentInstrumentId('default');
+    }
+  };
+
   const handleTunnelClick = () => {
     const noteObj = NOTES[selectedNoteIndex];
     triggerSound(noteObj);
@@ -62,13 +134,14 @@ export default function App() {
   const handleClearTimeline = () => {
     setBlocks([]);
     setActiveBlockId(null);
+    clearTimelineInDB();
   };
 
   return (
     <div
       id="tunnel-studio-root"
-      className={`fixed inset-0 h-full h-dvh max-h-dvh w-full overflow-hidden flex flex-col justify-between select-none pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)] transition-colors duration-300 ${
-        isDark ? 'bg-[#090a0f] text-neutral-100' : 'bg-slate-50 text-slate-900'
+      className={`fixed inset-0 h-full h-dvh max-h-dvh w-full overflow-hidden flex flex-col justify-between select-none pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)] transition-colors duration-200 ${
+        isDark ? 'bg-[#090a0f] text-neutral-100' : 'bg-[#f8fafc] text-neutral-900'
       }`}
     >
       {/* Ambient background atmosphere */}
@@ -87,7 +160,7 @@ export default function App() {
       {/* Top Header Bar */}
       <header
         id="studio-header"
-        className="relative z-10 w-full max-w-xl mx-auto px-5 py-2.5 flex items-center justify-between flex-shrink-0"
+        className="relative z-50 w-full max-w-xl mx-auto px-5 py-2.5 flex items-center justify-between flex-shrink-0"
       >
         <div className="flex items-center gap-2.5">
           <div
@@ -262,29 +335,28 @@ export default function App() {
         blocks={blocks}
         onClear={handleClearTimeline}
         activeBlockId={activeBlockId}
+        currentInstrument={currentInstrumentId}
       />
 
-      {/* Bottom Status Bar */}
-      <footer
-        id="studio-footer"
-        className={`relative z-10 w-full max-w-xl mx-auto px-5 py-2.5 flex items-center justify-between text-[10px] border-t flex-shrink-0 transition-colors ${
-          isDark
-            ? 'border-neutral-900/80 text-neutral-500'
-            : 'border-neutral-200 text-neutral-400'
-        }`}
-      >
-        <div className="flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400/90 animate-pulse" />
-          <span>Fullscreen PWA</span>
-        </div>
-        <div
-          className={`font-mono text-[10px] ${
-            isDark ? 'text-neutral-600' : 'text-neutral-400'
-          }`}
-        >
-          {blocks.length} {blocks.length === 1 ? 'step' : 'steps'} on canvas
-        </div>
-      </footer>
+      {/* Bottom Instrument Navigation Bar: Default + User Instruments + More */}
+      <InstrumentNav
+        currentInstrumentId={currentInstrumentId}
+        onSelectInstrument={handleSelectInstrument}
+        customInstruments={customInstruments}
+        onOpenMore={() => setShowCreatorModal(true)}
+      />
+
+      {/* Instrument Creator Overlay */}
+      <InstrumentCreatorModal
+        isOpen={showCreatorModal}
+        onClose={() => setShowCreatorModal(false)}
+        customInstruments={customInstruments}
+        onSaveInstrument={handleSaveInstrument}
+        onToggleNav={handleToggleNav}
+        onDeleteInstrument={handleDeleteInstrument}
+        onSelectInstrument={handleSelectInstrument}
+        currentInstrumentId={currentInstrumentId}
+      />
 
       {/* Offline Toast */}
       <OfflineIndicator />
